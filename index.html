@@ -1247,6 +1247,16 @@ async function fetchCoreTable(table, cols){
   return rows;
 }
 async function syncMetaTable(table, arr, toRow){
+  // Returns true only if every write (and every delete chunk) actually
+  // succeeded against Supabase. Callers (saveMeta -> saveAttendanceDelta ->
+  // findAndRemoveDuplicateEmployees etc.) rely on this to know whether it's
+  // safe to tell the user "saved to the cloud".
+  const CHUNK = 500; // keep delete .in() lists small — large IN-lists can
+                      // fail outright (URL/query size), and previously that
+                      // failure was silently swallowed, so a big cleanup
+                      // (e.g. thousands of duplicate employees) looked
+                      // "done" locally while the cloud rows never actually
+                      // got deleted, and other users never saw the change.
   try{
     // Was: always fetched every ID from Supabase first to know what to
     // delete. Now: use the cached "what's in the cloud" set, which stays
@@ -1257,8 +1267,33 @@ async function syncMetaTable(table, arr, toRow){
     const toDelete = [...dbIds].filter(id=>!localIds.has(id));
     const added = [...localIds].filter(id=>!dbIds.has(id));
     const rows = arr.map(toRow);
-    if(rows.length){ const {error} = await sb.from(table).upsert(rows, {onConflict:'id'}); if(error){ console.error('Supabase upsert error ('+table+'):', error); return; } }
-    if(toDelete.length){ const {error} = await sb.from(table).delete().in('id', toDelete); if(error){ console.error('Supabase delete error ('+table+'):', error); return; } }
+    if(rows.length){
+      const upsertJobs = [];
+      for(let i=0;i<rows.length;i+=CHUNK) upsertJobs.push(sb.from(table).upsert(rows.slice(i,i+CHUNK), {onConflict:'id'}));
+      const results = await Promise.all(upsertJobs);
+      for(const {error} of results){
+        if(error){ console.error('Supabase upsert error ('+table+'):', error); return false; }
+      }
+    }
+    if(toDelete.length){
+      const deleteJobs = [];
+      for(let i=0;i<toDelete.length;i+=CHUNK) deleteJobs.push(sb.from(table).delete().in('id', toDelete.slice(i,i+CHUNK)).select('id'));
+      const results = await Promise.all(deleteJobs);
+      let actuallyDeleted = 0;
+      for(const {data, error} of results){
+        if(error){ console.error('Supabase delete error ('+table+'):', error); return false; }
+        actuallyDeleted += (data ? data.length : 0);
+      }
+      // A DELETE with no error but fewer rows returned than requested usually
+      // means Row Level Security silently matched 0 rows for some/all of
+      // them (missing DELETE policy) rather than an actual failure — from
+      // PostgREST's point of view that's a "successful" delete of nothing.
+      // Treat it as a failure so the caller doesn't report false success.
+      if(actuallyDeleted < toDelete.length){
+        console.error('Supabase delete ('+table+'): requested '+toDelete.length+' but only '+actuallyDeleted+' rows actually deleted — likely missing a DELETE RLS policy for this role.');
+        return false;
+      }
+    }
     // Both writes succeeded — the cache now matches what we just pushed.
     cloudIdCache[table] = localIds;
     if(CORE_CACHE_TABLES.has(table)) writeCoreCache(table, rows);
@@ -1268,7 +1303,8 @@ async function syncMetaTable(table, arr, toRow){
       if(toDelete.length) parts.push(toDelete.length+' removed');
       logActivity(table, parts.join(', '));
     }
-  }catch(e){ console.error('Sync failed ('+table+'):', e); }
+    return true;
+  }catch(e){ console.error('Sync failed ('+table+'):', e); return false; }
 }
 function empToRow(e){ return {id:e.id, emp_code:e.empCode, name:e.name, department:e.department, category:e.category||'Staff', position:e.position, email:e.email, phone:e.phone, join_date:e.joinDate, status:e.status, zk_pin:e.zkPin, shift_id:e.shiftId||null, project_id:e.projectId||null, auto_created:!!e.autoCreated}; }
 function empFromRow(r){ return {id:r.id, empCode:r.emp_code, name:r.name, department:r.department, category:r.category||'Staff', position:r.position, email:r.email, phone:r.phone, joinDate:r.join_date, status:r.status, zkPin:r.zk_pin, shiftId:r.shift_id, projectId:r.project_id, autoCreated:!!r.auto_created}; }
@@ -1348,10 +1384,12 @@ window.addEventListener('beforeunload', function(e){
 async function saveMeta(){
   /* Persists everything EXCEPT attendance — employees/departments/leaves/shifts/
      shiftRoster/projects/recycleBin are small, so this is always cheap
-     regardless of how many attendance records exist. */
+     regardless of how many attendance records exist. Returns true only if
+     every table's sync actually succeeded — callers use this to decide
+     whether it's safe to report success to the user. */
   beginCloudSave();
   try{
-    await Promise.all([
+    const results = await Promise.all([
       syncMetaTable('departments', departments, deptToRow),
       syncMetaTable('employees', employees, empToRow),
       syncMetaTable('leaves', leaves, leaveToRow),
@@ -1360,6 +1398,7 @@ async function saveMeta(){
       syncMetaTable('projects', projects, projToRow),
       syncMetaTable('recycle_bin', recycleBin, recycleToRow)
     ]);
+    return results.every(ok=>ok!==false);
   } finally { endCloudSave(); }
 }
 async function saveAttendanceFull(records){
@@ -1411,8 +1450,9 @@ async function saveAttendanceDelta(putRecords, deleteIds){
      touching the rest of a potentially million-row table. This is what keeps
      marking attendance, imports, leave approval, and timecards fast at any
      dataset size. */
-  await saveMeta();
+  const metaOk = await saveMeta();
   invalidateAttendanceIndex();
+  if(!metaOk) throw new Error('Meta table sync (e.g. employees) failed to save to Supabase — see console for the specific table/error.');
   if((!putRecords || !putRecords.length) && (!deleteIds || !deleteIds.length)) return;
   beginCloudSave();
   try{
@@ -1895,7 +1935,7 @@ async function findAndRemoveDuplicateEmployees(){
     banner.textContent = `✅ Removed ${toRemove.length} duplicate employee record(s) across ${dupGroups.length} Employee Code(s) and confirmed saved to the cloud. Moved to Recycle Bin — restorable for 90 days.`;
   }catch(e){
     console.error('Duplicate removal save failed:', e);
-    banner.textContent = `⚠ Removed duplicates locally, but the cloud save failed. Please stay on this page and try "Remove Duplicates" again, or you may see the duplicates return on next load.`;
+    banner.textContent = `⚠ Removed duplicates locally, but the cloud save failed — the change did NOT reach Supabase and other users still see the duplicates. This is very likely a missing DELETE policy under Row Level Security for the "employees" table (check Supabase → Authentication → Policies). See the browser console for details, or reload this page to undo the local-only change.`;
   }finally{
     if(btn){ btn.disabled = false; btn.textContent = btn.dataset.origText; }
   }
@@ -4994,6 +5034,33 @@ function unsubscribeRealtime(){
   clearTimeout(_realtimeReconnectTimer);
   if(_realtimeChannel){ sb.removeChannel(_realtimeChannel); _realtimeChannel = null; }
 }
+/* ---- Polling fallback -------------------------------------------------
+   The realtime badge only reflects whether the websocket *channel* is
+   connected (`status === 'SUBSCRIBED'`) — it does NOT confirm that Postgres
+   is actually broadcasting row changes. That broadcasting only happens if
+   Realtime replication is turned on for each table in the Supabase
+   dashboard (Database → Replication) and RLS (if enabled) allows the
+   logged-in role to read the changed rows. If either of those isn't set up,
+   the badge can show "🟢 Live" while other users' edits never arrive — the
+   channel is open, it's just never told about anything.
+   This periodic refresh is a safety net so every user's screen converges to
+   the true cloud state within ~45s regardless of whether realtime
+   broadcasting is actually configured correctly. */
+let _corePollTimer = null;
+function startCorePolling(intervalMs = 45000){
+  stopCorePolling();
+  _corePollTimer = setInterval(async ()=>{
+    if(document.hidden) return;                                 // tab not visible — skip
+    if(document.querySelector('.modal-overlay.active')) return; // don't yank the screen mid-edit
+    if(_pendingCloudSaves > 0) return;                           // a save from this tab is still in flight
+    try{
+      await loadCoreFromCloud();
+      invalidateAttendanceIndex();
+      renderAll(currentView);
+    }catch(e){ console.error('Core polling refresh failed:', e); }
+  }, intervalMs);
+}
+function stopCorePolling(){ if(_corePollTimer){ clearInterval(_corePollTimer); _corePollTimer = null; } }
 /* ================= ROLES & TEAM ACCESS ================= */
 function applyRoleUI(){
   document.body.classList.remove('role-admin','role-manager','role-viewer','role-none');
@@ -5152,6 +5219,7 @@ async function startApp(userArg){
   renderAll(currentView);
   checkRejoiningNotifications();
   subscribeRealtime();
+  startCorePolling();
 }
 async function doLogin(){
   const email = document.getElementById('loginEmail').value.trim();
@@ -5169,6 +5237,7 @@ async function doLogin(){
 async function doLogout(){
   if(!confirm('Sign out?')) return;
   unsubscribeRealtime();
+  stopCorePolling();
   _realtimeStatus = 'connecting';
   await sb.auth.signOut();
   location.reload();
