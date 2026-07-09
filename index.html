@@ -1711,8 +1711,14 @@ function renderEmployees(){
   const catF = document.getElementById('empCategoryFilter').value;
   const statF = document.getElementById('empStatusFilter').value;
   const projF = document.getElementById('empProjectFilter').value;
+  // Uses the same "exact ID match wins outright" rule as Attendance Records
+  // (see matchEmployeesByQuery) — previously this used a plain substring
+  // match, so searching an ID like "85" also matched any ID that merely
+  // contained those digits (1785, 2085, 11385, 3980850, etc.) instead of
+  // surfacing the actual employee 85 first.
+  const searchMatches = search ? new Set(matchEmployeesByQuery(search, false).map(e=>e.id)) : null;
   let list = employees.filter(e=>
-    (e.name.toLowerCase().includes(search)||e.empCode.toLowerCase().includes(search)) &&
+    (!searchMatches || searchMatches.has(e.id)) &&
     (!deptF || e.department===deptF) && (!catF || (e.category||'Staff')===catF) && (!statF || e.status===statF) &&
     (!projF || (projF==='none'? !e.projectId : e.projectId===projF))
   );
@@ -1835,8 +1841,9 @@ function deleteAllEmployees(){
   const catF = document.getElementById('empCategoryFilter').value;
   const statF = document.getElementById('empStatusFilter').value;
   const projF = document.getElementById('empProjectFilter').value;
+  const searchMatches = search ? new Set(matchEmployeesByQuery(search, false).map(e=>e.id)) : null;
   const list = employees.filter(e=>
-    (e.name.toLowerCase().includes(search)||e.empCode.toLowerCase().includes(search)) &&
+    (!searchMatches || searchMatches.has(e.id)) &&
     (!deptF || e.department===deptF) && (!catF || (e.category||'Staff')===catF) && (!statF || e.status===statF) &&
     (!projF || (projF==='none'? !e.projectId : e.projectId===projF))
   );
