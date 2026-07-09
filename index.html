@@ -230,6 +230,9 @@ body.role-viewer .status-btn, body.role-none .status-btn {
   .main{margin-left:64px;} .charts-row{grid-template-columns:1fr;}
   .form-row{grid-template-columns:1fr;} .mark-row{grid-template-columns:1fr 1fr;}
 }
+.sortable-th{cursor:pointer;user-select:none;white-space:nowrap;}
+.sortable-th:hover{color:var(--primary,#e6772e);}
+.sort-ind{display:inline-block;margin-left:4px;font-size:10px;opacity:0.6;}
 </style>
 </head>
 <body>
@@ -418,7 +421,18 @@ body.role-viewer .status-btn, body.role-none .status-btn {
             </div>
           </div>
           <div class="table-wrap" id="recordsTableWrap"><table id="recordsTable">
-            <thead><tr><th>Date</th><th>Emp ID</th><th>Employee</th><th>Department</th><th>Project</th><th>Shift</th><th>Status</th><th>Check In</th><th>Check Out</th><th>Remarks</th></tr></thead>
+            <thead><tr>
+              <th class="sortable-th" onclick="toggleRecordsSort('date')">Date<span class="sort-ind" id="sortInd-date"></span></th>
+              <th class="sortable-th" onclick="toggleRecordsSort('empCode')">Emp ID<span class="sort-ind" id="sortInd-empCode"></span></th>
+              <th class="sortable-th" onclick="toggleRecordsSort('name')">Employee<span class="sort-ind" id="sortInd-name"></span></th>
+              <th class="sortable-th" onclick="toggleRecordsSort('department')">Department<span class="sort-ind" id="sortInd-department"></span></th>
+              <th class="sortable-th" onclick="toggleRecordsSort('project')">Project<span class="sort-ind" id="sortInd-project"></span></th>
+              <th class="sortable-th" onclick="toggleRecordsSort('shift')">Shift<span class="sort-ind" id="sortInd-shift"></span></th>
+              <th class="sortable-th" onclick="toggleRecordsSort('status')">Status<span class="sort-ind" id="sortInd-status"></span></th>
+              <th class="sortable-th" onclick="toggleRecordsSort('checkIn')">Check In<span class="sort-ind" id="sortInd-checkIn"></span></th>
+              <th class="sortable-th" onclick="toggleRecordsSort('checkOut')">Check Out<span class="sort-ind" id="sortInd-checkOut"></span></th>
+              <th class="sortable-th" onclick="toggleRecordsSort('remarks')">Remarks<span class="sort-ind" id="sortInd-remarks"></span></th>
+            </tr></thead>
             <tbody></tbody></table></div>
           <div id="recordsPagination" style="display:flex;justify-content:center;align-items:center;gap:10px;margin-top:14px;"></div>
         </div>
@@ -503,7 +517,10 @@ body.role-viewer .status-btn, body.role-none .status-btn {
           <div class="card" style="margin-bottom:16px;">
             <h3>Assign Shift for a Date Range (Rotation / Temporary Override)</h3>
             <div class="form-row" style="margin-top:12px;">
-              <div class="form-group"><label>Employee</label><select id="rosterEmp"></select></div>
+              <div class="form-group"><label>Employee</label>
+                <input type="text" id="rosterEmpSearch" placeholder="🔍 Search by Employee ID or Name" style="margin-bottom:6px;" oninput="filterRosterEmpSelectDebounced()">
+                <select id="rosterEmp"></select>
+              </div>
               <div class="form-group"><label>Shift</label><select id="rosterShift"></select></div>
             </div>
             <div class="form-row">
@@ -2197,6 +2214,60 @@ function populateRecordFilters(){
    page's rows are turned into DOM/template strings (the actually expensive part). */
 window._recordsPage = 1;
 window._recordsPageSize = 100;
+window._recordsSortKey = 'date';
+window._recordsSortDir = 'desc'; // matches the previous fixed "newest first" default
+// Pulls the value to compare for a given column, resolving employee/shift/project
+// lookups once per row. Reused by both the initial filter sort and header clicks.
+function recordSortValue(r, key, shiftLookup, projMap){
+  const e = getEmp(r.empId);
+  switch(key){
+    case 'date': return r.date || '';
+    case 'empCode': return (e && e.empCode || '').toLowerCase();
+    case 'name': return (e && e.name || '').toLowerCase();
+    case 'department': return (e && e.department || '').toLowerCase();
+    case 'project': return r.project ? (projMap.get(r.project) || '').toLowerCase() : '';
+    case 'shift': { const s = e ? resolveShiftFast(shiftLookup, e.id, r.date) : null; return s ? s.name.toLowerCase() : ''; }
+    case 'status': return (r.status || '').toLowerCase();
+    case 'checkIn': { const m = timeStrToMinutesGeneric(r.checkIn); return m===null ? -1 : m; }
+    case 'checkOut': { const m = timeStrToMinutesGeneric(r.checkOut); return m===null ? -1 : m; }
+    case 'remarks': return (r.remarks || '').toLowerCase();
+    default: return '';
+  }
+}
+function applyRecordsSort(list){
+  const key = window._recordsSortKey || 'date';
+  const dir = window._recordsSortDir === 'asc' ? 1 : -1;
+  const shiftLookup = buildShiftLookup();
+  const projMap = new Map(projects.map(p=>[p.id, p.name]));
+  list.sort((a,b)=>{
+    const va = recordSortValue(a, key, shiftLookup, projMap);
+    const vb = recordSortValue(b, key, shiftLookup, projMap);
+    if(va < vb) return -1*dir;
+    if(va > vb) return 1*dir;
+    // Stable tie-break so rows for the same value don't jump around between renders.
+    return (a.date===b.date) ? 0 : (a.date<b.date ? 1 : -1);
+  });
+  return list;
+}
+function toggleRecordsSort(key){
+  if(window._recordsSortKey === key){
+    window._recordsSortDir = window._recordsSortDir === 'asc' ? 'desc' : 'asc';
+  } else {
+    window._recordsSortKey = key;
+    window._recordsSortDir = 'asc';
+  }
+  window._filteredRecords = applyRecordsSort((window._filteredRecords||[]).slice());
+  window._recordsPage = 1;
+  updateRecordsSortIndicators();
+  renderRecordsPage();
+}
+function updateRecordsSortIndicators(){
+  ['date','empCode','name','department','project','shift','status','checkIn','checkOut','remarks'].forEach(k=>{
+    const el = document.getElementById('sortInd-'+k);
+    if(!el) return;
+    el.textContent = (window._recordsSortKey===k) ? (window._recordsSortDir==='asc'?'▲':'▼') : '';
+  });
+}
 function filterRecords(){
   // Show feedback immediately, then let the browser paint it before the
   // potentially-heavy filter/sort runs — on very large datasets this is the
@@ -2254,7 +2325,7 @@ async function runFilterRecords(){
   if(cat) list = list.filter(a=>{ const e=getEmp(a.empId); return e && (e.category||'Staff')===cat; });
   if(projF==='none') list = list.filter(a=>!a.project);
   else if(projF) list = list.filter(a=>a.project===projF);
-  list = list.slice().sort(cmpDateDesc);
+  list = applyRecordsSort(list.slice());
   window._filteredRecords = list;
   window._recordsPage = 1;
   renderRecordsPage();
@@ -2268,6 +2339,7 @@ const RECORDS_VIRTUALIZE_THRESHOLD = 150;
 const RECORDS_ROW_HEIGHT = 37; // matches .tc-table td padding (8px x2) + text line height + border
 const RECORDS_BUFFER_ROWS = 8;
 function renderRecordsPage(){
+  updateRecordsSortIndicators();
   const list = window._filteredRecords || [];
   const pageSize = window._recordsPageSize || 100;
   const totalPages = Math.max(1, Math.ceil(list.length/pageSize));
@@ -2888,7 +2960,13 @@ function renderAssignShiftTable(){
   populateProjectSelects();
   const projF = document.getElementById('bulkAssignProjectFilter').value;
   const shiftF = document.getElementById('bulkAssignShiftFilter').value;
-  const search = (document.getElementById('assignSearch').value||'').toLowerCase();
+  const search = (document.getElementById('assignSearch').value||'').trim();
+  // Same "exact Employee ID match wins outright, otherwise partial ID/name
+  // match" rule used everywhere else in the app (Attendance Records, Roster,
+  // Timesheet) — a plain substring match on ID alone was pulling in anything
+  // that merely contained the searched digits (e.g. searching "85" matched
+  // 1785, 11185, 859, 2085...) instead of the specific employee.
+  const searchMatchIds = search ? new Set(matchEmployeesByQuery(search, false).map(e=>e.id)) : null;
 
   let list = employees.filter(e=>{
     if(deptF && e.department!==deptF) return false;
@@ -2896,7 +2974,7 @@ function renderAssignShiftTable(){
     if(projF && projF!=='none' && e.projectId!==projF) return false;
     if(shiftF==='none' && e.shiftId) return false;
     if(shiftF && shiftF!=='none' && e.shiftId!==shiftF) return false;
-    if(search && !e.name.toLowerCase().includes(search) && !e.empCode.toLowerCase().includes(search)) return false;
+    if(searchMatchIds && !searchMatchIds.has(e.id)) return false;
     return true;
   });
   window._assignFilteredList = list;
@@ -2959,11 +3037,29 @@ function applyBulkShiftToSelected(){
 }
 
 function populateRosterSelects(){
-  document.getElementById('rosterEmp').innerHTML = employees.map(e=>`<option value="${e.id}">${e.name}</option>`).join('');
+  document.getElementById('rosterEmp').innerHTML = employees.map(e=>`<option value="${e.id}">${e.name} (${e.empCode})</option>`).join('');
   populateShiftSelects();
   if(!document.getElementById('rosterFrom').value) document.getElementById('rosterFrom').value = todayStr();
   if(!document.getElementById('rosterTo').value) document.getElementById('rosterTo').value = todayStr();
 }
+function filterRosterEmpSelect(){
+  // Narrows the Employee dropdown to whoever matches the ID or name typed so
+  // far — same behavior as the Timesheet page's employee search, so typing a
+  // given Employee ID always resolves to the same person across the app.
+  const sel = document.getElementById('rosterEmp');
+  const q = (document.getElementById('rosterEmpSearch').value || '').trim();
+  const cur = sel.value;
+  const matches = matchEmployeesByQuery(q, false);
+  if(!matches.length){
+    sel.innerHTML = '<option value="">No matching employee</option>';
+    return;
+  }
+  sel.innerHTML = matches.map(e=>`<option value="${e.id}">${e.name} (${e.empCode})</option>`).join('');
+  // Keep the previous selection if it still matches; otherwise default to the first match.
+  if(cur && matches.some(e=>e.id===cur)) sel.value = cur;
+  else sel.value = matches[0].id;
+}
+const filterRosterEmpSelectDebounced = debounce(filterRosterEmpSelect, 150);
 function applyRoster(){
   const empId = document.getElementById('rosterEmp').value;
   const shiftId = document.getElementById('rosterShift').value;
@@ -3717,70 +3813,175 @@ function parseAttendanceRows(content, format, fallbackLateMins, dateOverride, sh
     if(r) records.push(r); else failCount++;
   });
   if(!records.length) return {rows:[], failCount};
-  const grouped = {};
+
+  // Group all punches per employee (pin) across the whole file first, WITHOUT
+  // binning by calendar date yet — needed so an overnight shift (e.g. clock in
+  // ~10PM, clock out ~9AM the next morning) can be paired correctly instead of
+  // being cut off at midnight and split across two unrelated date groups.
+  const perPin = {};
   records.forEach(r=>{
-    // If a date was explicitly set for this file, every punch in it is attributed
-    // to that date regardless of what the device recorded (useful for exports
-    // that have no date field at all, or single-day dumps).
-    const dateStr = dateOverride || dateKey(r.datetime);
-    const key = r.pin+'_'+dateStr;
-    if(!grouped[key]) grouped[key] = {pin:r.pin, date:dateStr, times:[]};
-    grouped[key].times.push({time:r.datetime, statusCode:r.statusCode});
+    if(!perPin[r.pin]) perPin[r.pin] = [];
+    perPin[r.pin].push({time:r.datetime, statusCode:r.statusCode});
   });
-  const rows = Object.values(grouped).map(g=>{
-    g.times.sort((a,b)=> a.time - b.time);
-    let checkInTime, checkOutTime;
-    if(g.times.length===1){
-      // Only one punch that day — treat it as the check-in regardless of whatever
-      // raw status code the device wrote. Many devices tag every single punch as
-      // "OUT" internally even though, practically, it's the only sign the person
-      // was present that day — showing it as a blank check-in was the bug.
-      checkInTime = g.times[0].time;
-      checkOutTime = null;
-    } else {
-      const inTimes = g.times.filter(t=>t.statusCode==='in');
-      const outTimes = g.times.filter(t=>t.statusCode==='out');
-      if(inTimes.length && outTimes.length){
-        // Both explicit IN and OUT punches exist — trust the device's own tagging.
-        checkInTime = inTimes[0].time;
-        checkOutTime = outTimes[outTimes.length-1].time;
-      } else {
-        // Multiple punches but codes are missing, or all tagged the same way —
-        // fall back to earliest = check-in, latest = check-out.
-        checkInTime = g.times[0].time;
-        checkOutTime = g.times[g.times.length-1].time;
-      }
-    }
-    const emp = findEmployeeByIdentifier(g.pin);
-    let status, shiftName;
-    if(emp){
-      const inMinsForDetect = checkInTime.getHours()*60+checkInTime.getMinutes();
-      const shift = autoDetectShift
-        ? findClosestShiftByCheckIn(inMinsForDetect)
-        : resolveShiftFast(lookup, emp.id, g.date);
-      if(shift){
-        const [sh,sm] = shift.startTime.split(':').map(Number);
-        const cutoffMins = sh*60+sm + (shift.graceMinutes||0);
-        const inMins = checkInTime.getHours()*60+checkInTime.getMinutes();
-        status = inMins>cutoffMins ? 'Late':'Present';
-        shiftName = shift.name + (autoDetectShift?' (auto-detected)':'');
+
+  const rows = [];
+  Object.keys(perPin).forEach(pin=>{
+    let times = perPin[pin].slice().sort((a,b)=> a.time - b.time);
+    // Collapse punches that land on the exact same minute into a single entry.
+    // ZKTeco devices frequently log one physical scan (one basma) as two lines
+    // in the export — e.g. a verification event and an attendance event both
+    // stamped to the same second. Without this, a single scan was being split
+    // into a fake "earliest" and "latest" pair and shown as identical
+    // Check In / Check Out times instead of leaving Check Out blank.
+    const deduped = [];
+    times.forEach(t=>{
+      const last = deduped[deduped.length-1];
+      const sameMinute = last && Math.abs(t.time - last.time) < 60000;
+      if(!sameMinute) deduped.push(t);
+      else if(!last.statusCode && t.statusCode) last.statusCode = t.statusCode; // keep any real code if one copy had it
+    });
+    times = deduped;
+    if(!times.length) return;
+
+    const emp = findEmployeeByIdentifier(pin);
+    // Representative shift used only to decide whether this employee's punches
+    // need overnight stitching. Auto-Detect-shift-per-punch mode intentionally
+    // keeps the original per-calendar-day behavior below, since that mode is
+    // built around judging each individual punch against the nearest defined
+    // shift rather than pairing punches into shifts.
+    const primaryShift = (!autoDetectShift && emp)
+      ? resolveShiftFast(lookup, emp.id, dateOverride || dateKey(times[0].time))
+      : null;
+    const crossesMidnight = !!(primaryShift && (()=>{
+      const [sh,sm] = primaryShift.startTime.split(':').map(Number);
+      const [eh,em] = primaryShift.endTime.split(':').map(Number);
+      return (sh*60+sm) > (eh*60+em);
+    })());
+
+    function computeStatusFor(checkInTime, dateStr){
+      let status, shiftName;
+      if(emp){
+        const inMinsForDetect = checkInTime.getHours()*60+checkInTime.getMinutes();
+        const shift = autoDetectShift
+          ? findClosestShiftByCheckIn(inMinsForDetect)
+          : resolveShiftFast(lookup, emp.id, dateStr);
+        if(shift){
+          const [sh,sm] = shift.startTime.split(':').map(Number);
+          const cutoffMins = sh*60+sm + (shift.graceMinutes||0);
+          const inMins = checkInTime.getHours()*60+checkInTime.getMinutes();
+          status = inMins>cutoffMins ? 'Late':'Present';
+          shiftName = shift.name + (autoDetectShift?' (auto-detected)':'');
+        } else {
+          const inMins = checkInTime.getHours()*60+checkInTime.getMinutes();
+          status = inMins>fallbackLateMins ? 'Late':'Present';
+          shiftName = 'No Shift (fallback cutoff)';
+        }
       } else {
         const inMins = checkInTime.getHours()*60+checkInTime.getMinutes();
         status = inMins>fallbackLateMins ? 'Late':'Present';
-        shiftName = 'No Shift (fallback cutoff)';
+        shiftName = '-';
       }
-    } else {
-      const inMins = checkInTime.getHours()*60+checkInTime.getMinutes();
-      status = inMins>fallbackLateMins ? 'Late':'Present';
-      shiftName = '-';
+      return {status, shiftName};
     }
-    return {
-      pin:g.pin, date:g.date,
-      checkIn: checkInTime? formatTime12(checkInTime) : '',
-      checkOut: checkOutTime? formatTime12(checkOutTime) : '',
-      status, empId: emp?emp.id:null, shiftName
-    };
-  }).sort(cmpDateDesc);
+
+    if(!crossesMidnight){
+      // Original behavior, unchanged: group this employee's punches by calendar
+      // date and take earliest/latest (or explicit in/out tags) within that day.
+      const byDate = {};
+      times.forEach(t=>{
+        const ds = dateOverride || dateKey(t.time);
+        if(!byDate[ds]) byDate[ds] = [];
+        byDate[ds].push(t);
+      });
+      Object.keys(byDate).forEach(ds=>{
+        const dayTimes = byDate[ds];
+        let checkInTime, checkOutTime;
+        if(dayTimes.length===1){
+          // Only one punch that day — treat it as the check-in regardless of whatever
+          // raw status code the device wrote. Many devices tag every single punch as
+          // "OUT" internally even though, practically, it's the only sign the person
+          // was present that day — showing it as a blank check-in was the bug.
+          checkInTime = dayTimes[0].time;
+          checkOutTime = null;
+        } else {
+          const inTimes = dayTimes.filter(t=>t.statusCode==='in');
+          const outTimes = dayTimes.filter(t=>t.statusCode==='out');
+          if(inTimes.length && outTimes.length){
+            // Both explicit IN and OUT punches exist — trust the device's own tagging.
+            checkInTime = inTimes[0].time;
+            checkOutTime = outTimes[outTimes.length-1].time;
+          } else {
+            // Multiple punches but codes are missing, or all tagged the same way —
+            // fall back to earliest = check-in, latest = check-out.
+            checkInTime = dayTimes[0].time;
+            checkOutTime = dayTimes[dayTimes.length-1].time;
+          }
+        }
+        const {status, shiftName} = computeStatusFor(checkInTime, ds);
+        rows.push({
+          pin, date: ds,
+          checkIn: checkInTime? formatTime12(checkInTime) : '',
+          checkOut: checkOutTime? formatTime12(checkOutTime) : '',
+          status, empId: emp?emp.id:null, shiftName
+        });
+      });
+    } else {
+      // Overnight-shift stitching: walk this employee's punches as one continuous
+      // chronological stream instead of cutting them off at midnight, and pair
+      // each check-in with whichever following punch looks like the matching
+      // check-out — judged by whether it's closer to the shift's own start time
+      // or end time (circularMinuteDiff), not by which calendar date it landed
+      // on. This is what fixes overnight workers showing the same date's
+      // "end of shift" morning punch and "start of shift" evening punch as if
+      // they were one date's check-in/check-out pair.
+      const [sh,sm] = primaryShift.startTime.split(':').map(Number);
+      const [eh,em] = primaryShift.endTime.split(':').map(Number);
+      const startMins = sh*60+sm, endMins = eh*60+em;
+      function classify(t){
+        if(t.statusCode==='in') return 'in';
+        if(t.statusCode==='out') return 'out';
+        const mins = t.time.getHours()*60+t.time.getMinutes();
+        return circularMinuteDiff(mins, startMins) <= circularMinuteDiff(mins, endMins) ? 'in' : 'out';
+      }
+      let open = null; // {time, dateStr} — a check-in not yet matched to a check-out
+      times.forEach(t=>{
+        const cls = classify(t);
+        if(!open){
+          open = {time:t.time, dateStr: dateOverride || dateKey(t.time)};
+          return;
+        }
+        if(cls==='out'){
+          const {status, shiftName} = computeStatusFor(open.time, open.dateStr);
+          rows.push({
+            pin, date: open.dateStr,
+            checkIn: formatTime12(open.time), checkOut: formatTime12(t.time),
+            status, empId: emp?emp.id:null, shiftName
+          });
+          open = null;
+        } else {
+          // Another check-in-like punch arrived before a matching check-out was
+          // found — the previous shift never got a closing scan, so record it
+          // as open (Check Out left blank) and start tracking the new one.
+          const {status, shiftName} = computeStatusFor(open.time, open.dateStr);
+          rows.push({
+            pin, date: open.dateStr,
+            checkIn: formatTime12(open.time), checkOut: '',
+            status, empId: emp?emp.id:null, shiftName
+          });
+          open = {time:t.time, dateStr: dateOverride || dateKey(t.time)};
+        }
+      });
+      if(open){
+        const {status, shiftName} = computeStatusFor(open.time, open.dateStr);
+        rows.push({
+          pin, date: open.dateStr,
+          checkIn: formatTime12(open.time), checkOut: '',
+          status, empId: emp?emp.id:null, shiftName
+        });
+      }
+    }
+  });
+  rows.sort(cmpDateDesc);
   return {rows, failCount};
 }
 
