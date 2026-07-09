@@ -2206,12 +2206,16 @@ function filterRecords(){
 async function runFilterRecords(){
   const from = document.getElementById('filterFrom').value;
   const to = document.getElementById('filterTo').value;
-  // Attendance Records only ever filtered over whatever months were already
-  // in memory, so a month that hadn't been loaded yet (anything older than
-  // the last BOOT_ATTENDANCE_MONTHS) silently showed as empty here even
-  // though the same month worked fine in Reports, which does load on demand.
-  // Loading the requested range first keeps both screens in sync.
-  await ensureRangeLoaded(from, to);
+  try{
+    await ensureRangeLoaded(from, to);
+  } catch(err){
+    console.error('Attendance Records: failed to load requested date range:', err);
+    const countEl = document.getElementById('recordsCount');
+    if(countEl) countEl.textContent = '⚠ Failed to load records';
+    const tbody = document.getElementById('recordsTable').querySelector('tbody');
+    if(tbody) tbody.innerHTML = `<tr><td colspan="10"><div class="empty-state"><div class="ic">⚠</div>Couldn't load records for this date range.<br><small>${(err && err.message) ? err.message : 'Check your internet connection and try again.'}</small></div></td></tr>`;
+    return;
+  }
   const emp = document.getElementById('filterEmp').value;
   const empIdSearch = document.getElementById('filterEmpId').value.trim().toLowerCase();
   const dept = document.getElementById('filterDept').value;
