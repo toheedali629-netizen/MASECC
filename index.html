@@ -100,16 +100,6 @@ button{cursor:pointer;border:none;border-radius:6px;padding:9px 16px;font-size:1
 .form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
 .modal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:16px;}
 
-.mark-row{display:grid;grid-template-columns:2fr 1.6fr 1fr 1fr;gap:10px;align-items:center;
-  background:#fafcfe;padding:10px 14px;border-radius:8px;border:1px solid #eef2f5;margin-bottom:8px;}
-.status-btns{display:flex;gap:5px;flex-wrap:wrap;}
-.status-btn{padding:5px 9px;font-size:11px;border-radius:14px;border:1px solid #dbe3ea;background:#fff;cursor:pointer;font-weight:600;}
-.status-btn.sel-present{background:#2e7d32;color:#fff;border-color:#2e7d32;}
-.status-btn.sel-absent{background:#c62828;color:#fff;border-color:#c62828;}
-.status-btn.sel-late{background:#ef6c00;color:#fff;border-color:#ef6c00;}
-.status-btn.sel-half{background:#1565c0;color:#fff;border-color:#1565c0;}
-.status-btn.sel-leave{background:#7b1fa2;color:#fff;border-color:#7b1fa2;}
-
 .empty-state{text-align:center;padding:50px 20px;color:var(--muted);}
 .empty-state .ic{font-size:42px;margin-bottom:10px;}
 
@@ -150,8 +140,7 @@ body.role-viewer .btn-primary, body.role-none .btn-primary,
 body.role-viewer .btn-green, body.role-none .btn-green,
 body.role-viewer .btn-danger, body.role-none .btn-danger,
 body.role-viewer .btn-warning, body.role-none .btn-warning,
-body.role-viewer .dropzone, body.role-none .dropzone,
-body.role-viewer .status-btn, body.role-none .status-btn {
+body.role-viewer .dropzone, body.role-none .dropzone {
   opacity:.4; pointer-events:none; cursor:not-allowed;
 }
 .role-badge{display:inline-block;padding:2px 9px;border-radius:12px;font-size:10.5px;font-weight:700;margin-left:8px;vertical-align:middle;}
@@ -228,7 +217,7 @@ body.role-viewer .status-btn, body.role-none .status-btn {
 @media(max-width:880px){
   .sidebar{width:64px;} .sidebar .logo h1,.sidebar .logo span,.nav-item span.label{display:none;}
   .main{margin-left:64px;} .charts-row{grid-template-columns:1fr;}
-  .form-row{grid-template-columns:1fr;} .mark-row{grid-template-columns:1fr 1fr;}
+  .form-row{grid-template-columns:1fr;}
 }
 .sortable-th{cursor:pointer;user-select:none;white-space:nowrap;}
 .sortable-th:hover{color:var(--primary,#e6772e);}
@@ -259,7 +248,7 @@ body.role-viewer .status-btn, body.role-none .status-btn {
     <div class="nav-item active" data-view="dashboard"><span class="ic">📊</span><span class="label">Dashboard</span></div>
     <div class="nav-item" data-view="employees"><span class="ic">👥</span><span class="label">Employees</span></div>
     <div class="nav-item" data-view="recyclebin"><span class="ic">🗑️</span><span class="label">Recycle Bin</span></div>
-    <div class="nav-item" data-view="mark"><span class="ic">✅</span><span class="label">Mark Attendance</span></div>
+    <div class="nav-item" data-view="mark"><span class="ic">✅</span><span class="label">Upload Data</span></div>
     <div class="nav-item" data-view="timecard"><span class="ic">🧾</span><span class="label">Timesheet</span></div>
     <div class="nav-item" data-view="records"><span class="ic">📋</span><span class="label">Attendance Records</span></div>
     <div class="nav-item" data-view="leave"><span class="ic">🗓️</span><span class="label">Leave Management</span></div>
@@ -353,13 +342,12 @@ body.role-viewer .status-btn, body.role-none .status-btn {
           <div class="left">
             <label style="font-weight:700;font-size:13px;">Select Date:</label>
             <input type="date" id="markDate">
-            <input type="text" id="markEmpSearch" placeholder="🔍 Search by Employee ID or Name" oninput="renderMarkAttendanceDebounced()">
           </div>
           <div class="right">
-            <button class="btn-outline" onclick="openZkImportModal()">📤 Import Biometric Files (By Project)</button>
-            <button class="btn-outline" onclick="markAllPresent()">Mark All Present</button>
-            <button class="btn-outline" onclick="autoDetectMarkStatuses()" title="Recalculates each row's Present/Late status by matching their typed Check In time to whichever shift's start time is closest.">🎯 Auto-Detect Status</button>
-            <button class="btn-green" onclick="saveAttendanceAll()">💾 Save Attendance</button>
+            <button class="btn-outline" onclick="openZkImportModal()">📤 Upload Attendance File</button>
+            <button class="btn-outline" onclick="undoLastImport()" id="undoLastImportBtn" style="display:none;" title="Removes exactly the records added/changed by your most recent upload — use this if you uploaded to the wrong project.">↩ Undo Last Import</button>
+            <button class="btn-outline" onclick="autoDetectMarkStatuses()" title="Recalculates every saved record's Present/Late status for this date by matching its Check In time to whichever shift's start time is closest. Click Save Attendance afterwards to persist any changes.">🎯 Auto-Detect Status</button>
+            <button class="btn-green" onclick="saveAttendanceAll()" title="Persists this date's attendance records (including any Auto-Detect changes) to storage.">💾 Save Attendance</button>
           </div>
         </div>
         <div class="card"><div id="markList"></div></div>
@@ -385,7 +373,7 @@ body.role-viewer .status-btn, body.role-none .status-btn {
           </div>
         </div>
         <div class="card" id="timecardCard" style="padding:0;box-shadow:none;background:transparent;">
-          <div id="timecardOutput"><div class="card"><div class="empty-state"><div class="ic">🧾</div>Select an employee and date range, then click "Generate Timesheet". This is a read-only view of their attendance — to change any data, use Mark Attendance, Attendance Records, or re-import from the biometric device.</div></div></div>
+          <div id="timecardOutput"><div class="card"><div class="empty-state"><div class="ic">🧾</div>Select an employee and date range, then click "Generate Timesheet". This is a read-only view of their attendance — to change any data, use Upload Data, Attendance Records, or re-import from the biometric device.</div></div></div>
         </div>
       </div>
 
@@ -651,14 +639,28 @@ body.role-viewer .status-btn, body.role-none .status-btn {
         </div>
         <div class="card" style="margin-bottom:18px;border:2px solid #c62828;">
           <h3 style="margin-top:0;color:#c62828;">🧹 Clear Attendance for a Date Range</h3>
-          <p style="color:var(--muted);font-size:13px;">Use this to wipe out incorrect/dummy attendance for specific dates (e.g. records saved before real biometric data was imported) so you can re-import clean data. This only removes attendance records — employees, shifts and projects are untouched.</p>
+          <p style="color:var(--muted);font-size:13px;">Use this to wipe out incorrect/dummy attendance for specific dates (e.g. records saved before real biometric data was imported, or a file uploaded to the wrong project) so you can re-import clean data. This only removes attendance records — employees, shifts and projects are untouched.</p>
           <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:end;margin:10px 0;">
             <div><label style="font-size:12px;display:block;margin-bottom:3px;">From</label><input type="date" id="clearFrom"></div>
             <div><label style="font-size:12px;display:block;margin-bottom:3px;">To</label><input type="date" id="clearTo"></div>
+            <div><label style="font-size:12px;display:block;margin-bottom:3px;">Project <span style="font-weight:400;">(optional)</span></label><select id="clearProjectFilter"><option value="">All Projects</option><option value="none">No Project</option></select></div>
             <button class="btn-outline" onclick="previewClearAttendance()">Preview</button>
           </div>
           <div id="clearAttendancePreview" style="font-size:13px;margin-bottom:10px;"></div>
           <button class="btn-danger" id="clearAttendanceBtn" style="display:none;" onclick="confirmClearAttendance()">🧹 Delete These Records</button>
+        </div>
+        <div class="card" style="margin-bottom:18px;border:2px solid var(--primary);">
+          <h3 style="margin-top:0;color:var(--primary-dark);">🔀 Reassign Project for a Date Range</h3>
+          <p style="color:var(--muted);font-size:13px;">Uploaded a biometric file to the wrong project? This moves matching records to the correct project without touching their check-in/check-out times or status — no need to delete and re-upload.</p>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:end;margin:10px 0;">
+            <div><label style="font-size:12px;display:block;margin-bottom:3px;">From</label><input type="date" id="reassignFrom"></div>
+            <div><label style="font-size:12px;display:block;margin-bottom:3px;">To</label><input type="date" id="reassignTo"></div>
+            <div><label style="font-size:12px;display:block;margin-bottom:3px;">Current (wrong) Project</label><select id="reassignFromProject"><option value="">All Projects</option><option value="none">No Project</option></select></div>
+            <div><label style="font-size:12px;display:block;margin-bottom:3px;">Move to (correct) Project</label><select id="reassignToProject"><option value="none">No Project</option></select></div>
+            <button class="btn-outline" onclick="previewReassignProject()">Preview</button>
+          </div>
+          <div id="reassignProjectPreview" style="font-size:13px;margin-bottom:10px;"></div>
+          <button class="btn-primary" id="reassignProjectBtn" style="display:none;" onclick="confirmReassignProject()">🔀 Reassign These Records</button>
         </div>
         <div class="card" style="margin-bottom:18px;">
           <h3 style="margin-top:0;">🧾 Attendance-Only Backup &amp; Import</h3>
@@ -1054,7 +1056,7 @@ const MODULE_LIST = [
   {key:'dashboard', label:'Dashboard'},
   {key:'employees', label:'Employees'},
   {key:'recyclebin', label:'Recycle Bin'},
-  {key:'mark', label:'Mark Attendance'},
+  {key:'mark', label:'Upload Data'},
   {key:'timecard', label:'Timesheet'},
   {key:'records', label:'Attendance Records'},
   {key:'leave', label:'Leave Management'},
@@ -1107,7 +1109,6 @@ function debounce(fn, delay=150){
 // Debounced versions of the render/filter functions bound to search inputs.
 // Actual functions are declared further down (hoisted), so these wrappers
 // are safe to define here.
-const renderMarkAttendanceDebounced = debounce(()=>renderMarkAttendance(), 150);
 const renderLeavesDebounced = debounce(()=>renderLeaves(), 150);
 const renderAssignShiftTableDebounced = debounce(()=>renderAssignShiftTable(), 150);
 const filterReportEmpSelectDebounced = debounce(()=>filterReportEmpSelect(), 150);
@@ -1596,7 +1597,7 @@ function seedDefaultsIfEmpty(){
 
 /* ================= NAVIGATION ================= */
 let currentView = 'dashboard';
-const titles = {dashboard:'Dashboard',employees:'Employee Management',recyclebin:'Recycle Bin',mark:'Mark Attendance',timecard:'Timesheet',records:'Attendance Records',leave:'Leave Management',shifts:'Shift Management',projects:'Project Management',departments:'Department Management',reports:'Reports & Analytics',backup:'Backup & Restore'};
+const titles = {dashboard:'Dashboard',employees:'Employee Management',recyclebin:'Recycle Bin',mark:'Upload Data',timecard:'Timesheet',records:'Attendance Records',leave:'Leave Management',shifts:'Shift Management',projects:'Project Management',departments:'Department Management',reports:'Reports & Analytics',backup:'Backup & Restore'};
 function activateViewDOM(v){
   document.querySelectorAll('.nav-item').forEach(i=>i.classList.toggle('active', i.dataset.view===v));
   document.querySelectorAll('.view').forEach(vw=>vw.classList.remove('active'));
@@ -2108,65 +2109,68 @@ function closeModal(id){ document.getElementById(id).classList.remove('active');
 document.getElementById('markDate').value = todayStr();
 document.getElementById('markDate').addEventListener('change', renderMarkAttendance);
 
+// Mark Attendance is a summary-only view now — no per-employee list is rendered
+// here. Data gets INTO attendance records via Upload Attendance File (biometric
+// import, which parses/matches/saves on its own). This view just shows an
+// at-a-glance breakdown for the selected date, plus two housekeeping actions:
+// Auto-Detect Status (recompute Present/Late from each record's check-in time)
+// and Save Attendance (persist any pending in-memory changes to storage).
+window._markPendingChanges = []; // records touched by Auto-Detect but not yet saved
 function renderMarkAttendance(){
   const date = document.getElementById('markDate').value;
-  const search = (document.getElementById('markEmpSearch').value || '').trim().toLowerCase();
-  let active = employees.filter(e=>e.status==='Active');
-  if(search) active = active.filter(e=> e.name.toLowerCase().includes(search) || e.empCode.toLowerCase().includes(search));
-  document.getElementById('markList').innerHTML = active.map(e=>{
-    const existing = findAttendanceRecord(e.id, date);
-    const shift = getEmpShiftForDate(e.id, date);
-    const st = existing? existing.status : 'Present';
-    // Only pre-fill Check In/Out with a REAL previously-saved time. Do NOT
-    // default to the shift's start/end time — that was writing fake "everyone
-    // clocked in exactly on time" data the moment someone hit Save without
-    // typing an actual punch, which is exactly the dummy-data problem.
-    const ci = existing? existing.checkIn : '';
-    const co = existing? existing.checkOut : '';
-    return `<div class="mark-row" data-emp="${e.id}">
-      <div class="emp-cell"><div class="avatar" style="background:${colorFromString(e.name)}">${initials(e.name)}</div>
-        <div><div style="font-weight:600;">${e.name}</div>
-        <div style="font-size:11px;color:var(--muted);">${e.department}${shift? ' • '+shift.name+' ('+shiftTiming(shift)+')' : ' • No shift assigned'}</div></div></div>
-      <div class="status-btns">
-        ${['Present','Absent','Late','Half Day','On Leave'].map(s=>{
-          const cls = s==='Present'?'present':s==='Absent'?'absent':s==='Late'?'late':s==='Half Day'?'half':'leave';
-          return `<button type="button" class="status-btn ${s===st?'sel-'+cls:''}" onclick="setRowStatus(this,'${e.id}','${s}')">${s}</button>`;
-        }).join('')}
-      </div>
-      <input type="text" class="ci-input" value="${ci}" placeholder="Check In">
-      <input type="text" class="co-input" value="${co}" placeholder="Check Out">
-    </div>`;
-  }).join('') + (active.length===0? `<div class="empty-state"><div class="ic">👥</div>No active employees</div>`:'');
-  active.forEach(e=>{ 
-    const row = document.querySelector(`.mark-row[data-emp="${e.id}"]`);
-    row.dataset.status = row.querySelector('.status-btn.sel-present,.status-btn.sel-absent,.status-btn.sel-late,.status-btn.sel-half,.status-btn.sel-leave')?.textContent || 'Present';
+  const active = employees.filter(e=>e.status==='Active');
+  const dayRecords = attendance.filter(a=>a.date===date);
+  const recByEmp = new Map(dayRecords.map(r=>[r.empId, r]));
+  const counts = {Present:0, Absent:0, Late:0, 'Half Day':0, 'On Leave':0};
+  let marked = 0;
+  active.forEach(e=>{
+    const r = recByEmp.get(e.id);
+    if(!r) return;
+    marked++;
+    if(counts.hasOwnProperty(r.status)) counts[r.status]++;
   });
+  const notMarked = Math.max(0, active.length - marked);
+  const pending = window._markPendingChanges.length;
+  const batch = window._lastImportBatch;
+  const undoBtn = document.getElementById('undoLastImportBtn');
+  if(undoBtn) undoBtn.style.display = batch? 'inline-block' : 'none';
+  const cards = [
+    {label:'Total Active Employees', val: active.length, cls:''},
+    {label:'Present', val: counts.Present, cls:'green'},
+    {label:'Late', val: counts.Late, cls:'orange'},
+    {label:'Absent', val: counts.Absent, cls:'red'},
+    {label:'Half Day', val: counts['Half Day'], cls:'purple'},
+    {label:'On Leave', val: counts['On Leave'], cls:'purple'},
+    {label:'Not Yet Marked', val: notMarked, cls: notMarked? 'orange':'green'},
+  ];
+  document.getElementById('markList').innerHTML = `
+    <div class="stats-grid">
+      ${cards.map(c=>`<div class="stat-card ${c.cls}"><div><div class="num">${c.val}</div><div class="label">${c.label}</div></div></div>`).join('')}
+    </div>
+    <div style="margin-top:16px;font-size:12.5px;color:var(--muted);line-height:1.7;">
+      ${dayRecords.length
+        ? `${dayRecords.length.toLocaleString()} attendance record(s) saved for <b>${fmtDate(date)}</b>.`
+        : `No attendance records saved for <b>${fmtDate(date)}</b> yet.`}
+      ${pending? `<br>⚠ <b>${pending}</b> record(s) were updated by Auto-Detect and haven't been saved yet — click <b>💾 Save Attendance</b> to persist them.` : ''}
+      ${batch? `<br>↩ Last import: <b>${batch.imported}</b> new, <b>${batch.updated}</b> updated${batch.projText? ' ('+batch.projText+')' : ''}. Uploaded to the wrong project? Click <b>↩ Undo Last Import</b> above — this only works until you leave/reload the page.` : ''}
+      <br>Use <b>📤 Upload Attendance File</b> to import biometric device punches (they're matched to employees and saved automatically), <b>🎯 Auto-Detect Status</b> to recalculate Present/Late for already-saved records against your shift definitions, or <b>💾 Save Attendance</b> to persist any pending changes.
+    </div>
+  `;
 }
-function setRowStatus(btn, empId, status){
-  const row = btn.closest('.mark-row');
-  row.querySelectorAll('.status-btn').forEach(b=>b.className='status-btn');
-  const clsMap={'Present':'sel-present','Absent':'sel-absent','Late':'sel-late','Half Day':'sel-half','On Leave':'sel-leave'};
-  btn.classList.add(clsMap[status]);
-  row.dataset.status = status;
-}
-function markAllPresent(){
-  document.querySelectorAll('.mark-row').forEach(row=>{
-    row.querySelectorAll('.status-btn').forEach(b=>{
-      b.className = b.textContent==='Present'? 'status-btn sel-present' : 'status-btn';
-    });
-    row.dataset.status = 'Present';
-  });
-}
-/* Recalculates each row's Present/Late status from its typed Check In time, matching
-   it to whichever defined shift's start time is closest — rather than the employee's
-   fixed/rostered shift. Rows with no check-in typed yet are left untouched. */
+/* Recalculates Present/Late for every already-saved attendance record on the
+   selected date, matching each record's Check In time to whichever defined
+   shift's start time is closest — rather than the employee's fixed/rostered
+   shift. Records with no check-in time (e.g. Absent/On Leave) are left alone.
+   Changes are applied in memory and queued; Save Attendance persists them. */
 function autoDetectMarkStatuses(){
   if(!shifts.length){ alert('Define at least one shift first (Shift Management → Shift Definitions) to use Auto-Detect Status.'); return; }
   const date = document.getElementById('markDate').value;
+  const dayRecords = attendance.filter(a=>a.date===date);
+  if(!dayRecords.length){ alert(`No attendance records saved for ${fmtDate(date)} yet. Upload an attendance file first.`); return; }
   let changed = 0, skipped = 0;
-  document.querySelectorAll('.mark-row').forEach(row=>{
-    const ciVal = row.querySelector('.ci-input').value.trim();
-    if(!ciVal){ skipped++; return; }
+  dayRecords.forEach(rec=>{
+    const ciVal = (rec.checkIn||'').trim();
+    if(!ciVal || ciVal==='--'){ skipped++; return; }
     const ciDate = parseFlexibleDate(date+' '+ciVal);
     if(!ciDate){ skipped++; return; }
     const inMins = ciDate.getHours()*60+ciDate.getMinutes();
@@ -2175,33 +2179,25 @@ function autoDetectMarkStatuses(){
     const [sh,sm] = shift.startTime.split(':').map(Number);
     const cutoffMins = sh*60+sm + (shift.graceMinutes||0);
     const newStatus = inMins>cutoffMins? 'Late':'Present';
-    if(row.dataset.status === newStatus) return;
-    const btn = Array.from(row.querySelectorAll('.status-btn')).find(b=>b.textContent===newStatus);
-    if(btn){ setRowStatus(btn, row.dataset.emp, newStatus); changed++; }
+    if(rec.status === newStatus) return;
+    rec.status = newStatus;
+    if(!window._markPendingChanges.includes(rec)) window._markPendingChanges.push(rec);
+    changed++;
   });
+  renderMarkAttendance();
   alert(changed
-    ? `🎯 ${changed} row(s) updated based on their check-in time and the closest matching shift.${skipped? ' ('+skipped+' row(s) skipped — no check-in time entered.)':''}`
-    : `No status changes needed.${skipped? ' '+skipped+' row(s) have no check-in time entered.':''}`);
+    ? `🎯 ${changed} record(s) updated based on their check-in time and the closest matching shift. Click 💾 Save Attendance to persist ${changed>1?'them':'it'}.${skipped? ' ('+skipped+' record(s) skipped — no check-in time on file.)':''}`
+    : `No status changes needed.${skipped? ' '+skipped+' record(s) have no check-in time on file.':''}`);
 }
 function saveAttendanceAll(){
   const date = document.getElementById('markDate').value;
-  const changed = [];
-  let incomplete = 0;
-  document.querySelectorAll('.mark-row').forEach(row=>{
-    const empId = row.dataset.emp;
-    const status = row.dataset.status || 'Present';
-    const emp = getEmp(empId);
-    const ci = row.querySelector('.ci-input').value.trim() || '--';
-    const co = row.querySelector('.co-input').value.trim() || '--';
-    if(status!=='Absent' && status!=='On Leave' && ci==='--' && co==='--') incomplete++;
-    let rec = findAttendanceRecord(empId, date);
-    if(rec){ rec.status=status; rec.checkIn = status==='Absent'?'--':ci; rec.checkOut = status==='Absent'?'--':co; rec.project = emp.projectId||''; }
-    else { rec = {id:uid(), empId, date, status, checkIn: status==='Absent'?'--':ci, checkOut: status==='Absent'?'--':co, remarks:'', project: emp.projectId||''}; attendance.push(rec); }
-    changed.push(rec);
-  });
-  saveAttendanceDelta(changed, []);
-  alert(`Attendance saved successfully for ${fmtDate(date)}.${incomplete? '\n\n⚠ '+incomplete+' employee(s) were saved with no Check In/Out time — they will show as Absent on the Dashboard until a real time is entered.' : ''}`);
+  if(!window._markPendingChanges.length){ alert(`Nothing to save — all attendance for ${fmtDate(date)} is already up to date.`); return; }
+  const toSave = window._markPendingChanges.slice();
+  window._markPendingChanges = [];
+  saveAttendanceDelta(toSave, []);
+  alert(`✅ ${toSave.length} attendance record(s) saved for ${fmtDate(date)}.`);
   renderDashboard();
+  renderMarkAttendance();
 }
 
 /* ================= RECORDS ================= */
@@ -2840,6 +2836,24 @@ function populateProjectSelects(){
     const cur3 = bulkProjEl.value;
     bulkProjEl.innerHTML = '<option value="">All Projects</option><option value="none">No Project</option>' + projects.map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
     bulkProjEl.value = cur3;
+  }
+  const clearProjEl = document.getElementById('clearProjectFilter');
+  if(clearProjEl){
+    const cur4 = clearProjEl.value;
+    clearProjEl.innerHTML = '<option value="">All Projects</option><option value="none">No Project</option>' + projects.map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
+    clearProjEl.value = cur4;
+  }
+  const reassignFromEl = document.getElementById('reassignFromProject');
+  if(reassignFromEl){
+    const cur5 = reassignFromEl.value;
+    reassignFromEl.innerHTML = '<option value="">All Projects</option><option value="none">No Project</option>' + projects.map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
+    reassignFromEl.value = cur5;
+  }
+  const reassignToEl = document.getElementById('reassignToProject');
+  if(reassignToEl){
+    const cur6 = reassignToEl.value;
+    reassignToEl.innerHTML = '<option value="none">No Project</option>' + projects.map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
+    reassignToEl.value = cur6;
   }
 }
 
@@ -4308,14 +4322,20 @@ function confirmZkImport(){
 
     let imported=0, updated=0;
     const changed = []; // only the records actually touched by this import
+    const newIds = [];      // records created by this import (undo = delete)
+    const prevSnapshots = []; // records overwritten by this import (undo = restore)
     toImport.forEach(r=>{
       const key = r.empId+'_'+r.date;
       const rec = index.get(key);
-      if(rec){ Object.assign(rec, {status:r.status, checkIn:r.checkIn, checkOut:r.checkOut, remarks:'Device Import', project:r.projectId||''}); updated++; }
+      if(rec){
+        prevSnapshots.push({id:rec.id, status:rec.status, checkIn:rec.checkIn, checkOut:rec.checkOut, remarks:rec.remarks, project:rec.project});
+        Object.assign(rec, {status:r.status, checkIn:r.checkIn, checkOut:r.checkOut, remarks:'Device Import', project:r.projectId||''}); updated++;
+      }
       else {
         const newRec = {id:uid(), empId:r.empId, date:r.date, status:r.status, checkIn:r.checkIn, checkOut:r.checkOut, remarks:'Device Import', project:r.projectId||''};
         attendance.push(newRec);
         index.set(key, newRec);
+        newIds.push(newRec.id);
         imported++;
       }
       changed.push(rec || index.get(key));
@@ -4328,14 +4348,49 @@ function confirmZkImport(){
     // or a million.
     await saveAttendanceDelta(changed, []);
     closeModal('zkImportModal'); renderDashboard();
-    if(document.getElementById('view-mark').classList.contains('active')) renderMarkAttendance();
-    btn.disabled = false; btn.textContent = originalLabel;
 
     const projSummary = {};
     toImport.forEach(r=>{ projSummary[r.projectName||'General'] = (projSummary[r.projectName||'General']||0)+1; });
     const projText = Object.keys(projSummary).map(k=>`${k}: ${projSummary[k]}`).join(', ');
-    alert(`✅ Attendance imported: ${imported} new record(s), ${updated} updated record(s).\n${projText? 'Breakdown by project → '+projText : ''}`);
+    // Remember this import so "↩ Undo Last Import" (on the Upload Data page) can
+    // reverse exactly these records — deleting the ones it created, and restoring
+    // the previous values of the ones it overwrote — in case it was uploaded
+    // against the wrong project. This is session-only (cleared on page reload).
+    window._lastImportBatch = {id:uid(), timestamp:Date.now(), imported, updated, projText, newIds, prevSnapshots};
+    if(document.getElementById('view-mark').classList.contains('active')) renderMarkAttendance();
+    btn.disabled = false; btn.textContent = originalLabel;
+
+    alert(`✅ Attendance imported: ${imported} new record(s), ${updated} updated record(s).\n${projText? 'Breakdown by project → '+projText : ''}\n\nWrong project? Use ↩ Undo Last Import on the Upload Data page.`);
   }, 20);
+}
+/* Reverses exactly the records touched by the most recent biometric import —
+   deletes the ones it created, restores the previous status/check-in/out/project
+   of the ones it overwrote. Meant for "oops, wrong project" — only available
+   for the current browser session (cleared on reload). */
+function undoLastImport(){
+  const batch = window._lastImportBatch;
+  if(!batch){ alert('Nothing to undo — no import was made this session.'); return; }
+  if(!confirm(`Undo the last import (${batch.imported} new record(s), ${batch.updated} updated record(s)${batch.projText? ', '+batch.projText : ''})? This restores attendance to how it was before that import.`)) return;
+  // Delete the records this import created.
+  if(batch.newIds.length){
+    const delSet = new Set(batch.newIds);
+    attendance = attendance.filter(a=>!delSet.has(a.id));
+  }
+  // Restore the records this import overwrote. Build an id->record map once
+  // instead of calling attendance.find() per snapshot (O(n) each, O(n*m) total
+  // on a big import) — same fix already applied to the import path itself.
+  const byId = new Map(attendance.map(a=>[a.id, a]));
+  const restored = [];
+  batch.prevSnapshots.forEach(snap=>{
+    const rec = byId.get(snap.id);
+    if(rec){ Object.assign(rec, {status:snap.status, checkIn:snap.checkIn, checkOut:snap.checkOut, remarks:snap.remarks, project:snap.project}); restored.push(rec); }
+  });
+  invalidateAttendanceIndex();
+  saveAttendanceDelta(restored, batch.newIds);
+  window._lastImportBatch = null;
+  renderDashboard();
+  if(document.getElementById('view-mark').classList.contains('active')) renderMarkAttendance();
+  alert(`↩ Undo complete: ${batch.newIds.length} record(s) removed, ${restored.length} record(s) restored to their previous values.`);
 }
 function downloadZkSample(){
   let content='';
@@ -4461,33 +4516,89 @@ function performRestore(){
 function previewClearAttendance(){
   const from = document.getElementById('clearFrom').value;
   const to = document.getElementById('clearTo').value;
+  const projFilter = document.getElementById('clearProjectFilter').value;
   const btn = document.getElementById('clearAttendanceBtn');
   const out = document.getElementById('clearAttendancePreview');
   if(!from || !to){ out.innerHTML = `<span style="color:#c62828;">Please select both dates.</span>`; btn.style.display='none'; return; }
-  const matches = attendance.filter(a=>a.date>=from && a.date<=to);
-  window._clearAttFrom = from; window._clearAttTo = to;
+  const matches = attendance.filter(a=> a.date>=from && a.date<=to && matchesProjectFilter(a, projFilter));
+  window._clearAttFrom = from; window._clearAttTo = to; window._clearAttProject = projFilter;
+  const projLabel = projectFilterLabel(projFilter);
   if(!matches.length){
-    out.innerHTML = `No attendance records found between ${fmtDate(from)} and ${fmtDate(to)}.`;
+    out.innerHTML = `No attendance records found between ${fmtDate(from)} and ${fmtDate(to)}${projLabel? ' for '+projLabel : ''}.`;
     btn.style.display='none';
     return;
   }
   const byStatus = {};
   matches.forEach(a=> byStatus[a.status] = (byStatus[a.status]||0)+1);
   const breakdown = Object.entries(byStatus).map(([s,c])=>`${s}: ${c}`).join(', ');
-  out.innerHTML = `<span style="color:#c62828;"><b>${matches.length.toLocaleString()} record(s)</b> found between ${fmtDate(from)} and ${fmtDate(to)}</span> (${breakdown}). This will permanently delete them.`;
+  out.innerHTML = `<span style="color:#c62828;"><b>${matches.length.toLocaleString()} record(s)</b> found between ${fmtDate(from)} and ${fmtDate(to)}${projLabel? ' for '+projLabel : ''}</span> (${breakdown}). This will permanently delete them.`;
   btn.style.display='inline-block';
 }
 function confirmClearAttendance(){
-  const from = window._clearAttFrom, to = window._clearAttTo;
+  const from = window._clearAttFrom, to = window._clearAttTo, projFilter = window._clearAttProject || '';
   if(!from || !to) return;
-  const matches = attendance.filter(a=>a.date>=from && a.date<=to);
+  const matches = attendance.filter(a=> a.date>=from && a.date<=to && matchesProjectFilter(a, projFilter));
   if(!matches.length) return;
-  if(!confirm(`Permanently delete ${matches.length.toLocaleString()} attendance record(s) between ${fmtDate(from)} and ${fmtDate(to)}? This cannot be undone — consider downloading a backup first.`)) return;
-  const ids = matches.map(a=>a.id);
-  attendance = attendance.filter(a=>!(a.date>=from && a.date<=to));
-  saveAttendanceDelta([], ids);
-  document.getElementById('clearAttendancePreview').innerHTML = `✅ Deleted ${ids.length.toLocaleString()} record(s).`;
+  const projLabel = projectFilterLabel(projFilter);
+  if(!confirm(`Permanently delete ${matches.length.toLocaleString()} attendance record(s) between ${fmtDate(from)} and ${fmtDate(to)}${projLabel? ' for '+projLabel : ''}? This cannot be undone — consider downloading a backup first.`)) return;
+  const idSet = new Set(matches.map(a=>a.id));
+  attendance = attendance.filter(a=>!idSet.has(a.id));
+  invalidateAttendanceIndex();
+  saveAttendanceDelta([], Array.from(idSet));
+  document.getElementById('clearAttendancePreview').innerHTML = `✅ Deleted ${idSet.size.toLocaleString()} record(s).`;
   document.getElementById('clearAttendanceBtn').style.display='none';
+  renderDashboard();
+}
+// Shared helper: does record `a` match a project-filter select's value?
+// '' = all projects, 'none' = records with no project, otherwise a project id.
+function matchesProjectFilter(a, projFilter){
+  if(!projFilter) return true;
+  if(projFilter==='none') return !a.project;
+  return a.project===projFilter;
+}
+function projectFilterLabel(projFilter){
+  if(!projFilter) return '';
+  if(projFilter==='none') return '"No Project"';
+  const p = projects.find(p=>p.id===projFilter);
+  return p? `"${p.name}"` : '';
+}
+/* Reassign Project: moves matching attendance records from one project tag to
+   another for a date range, WITHOUT touching status/check-in/check-out — the
+   fix for "I uploaded the right punches but tagged them to the wrong project",
+   which is far more common than the data itself being wrong. */
+function previewReassignProject(){
+  const from = document.getElementById('reassignFrom').value;
+  const to = document.getElementById('reassignTo').value;
+  const fromProj = document.getElementById('reassignFromProject').value;
+  const toProj = document.getElementById('reassignToProject').value;
+  const out = document.getElementById('reassignProjectPreview');
+  const btn = document.getElementById('reassignProjectBtn');
+  if(!from || !to){ out.innerHTML = `<span style="color:#c62828;">Please select both dates.</span>`; btn.style.display='none'; return; }
+  if(fromProj === toProj){ out.innerHTML = `<span style="color:#c62828;">"Current" and "Move to" projects must be different.</span>`; btn.style.display='none'; return; }
+  const matches = attendance.filter(a=> a.date>=from && a.date<=to && matchesProjectFilter(a, fromProj));
+  window._reassignFrom = from; window._reassignTo = to; window._reassignFromProject = fromProj; window._reassignToProject = toProj;
+  const fromLabel = projectFilterLabel(fromProj) || 'All Projects';
+  const toLabel = toProj==='none'? '"No Project"' : (projects.find(p=>p.id===toProj)?.name || '');
+  if(!matches.length){
+    out.innerHTML = `No attendance records found between ${fmtDate(from)} and ${fmtDate(to)} for ${fromLabel}.`;
+    btn.style.display='none';
+    return;
+  }
+  out.innerHTML = `<b>${matches.length.toLocaleString()} record(s)</b> between ${fmtDate(from)} and ${fmtDate(to)} currently tagged ${fromLabel} will be moved to <b>"${toLabel}"</b>. Their status, check-in and check-out times are untouched.`;
+  btn.style.display='inline-block';
+}
+function confirmReassignProject(){
+  const from = window._reassignFrom, to = window._reassignTo, fromProj = window._reassignFromProject, toProj = window._reassignToProject;
+  if(!from || !to) return;
+  const matches = attendance.filter(a=> a.date>=from && a.date<=to && matchesProjectFilter(a, fromProj));
+  if(!matches.length) return;
+  const toLabel = toProj==='none'? 'No Project' : (projects.find(p=>p.id===toProj)?.name || '');
+  if(!confirm(`Move ${matches.length.toLocaleString()} record(s) to "${toLabel}"?`)) return;
+  const newProjectVal = toProj==='none'? '' : toProj;
+  matches.forEach(a=> a.project = newProjectVal);
+  saveAttendanceDelta(matches, []);
+  document.getElementById('reassignProjectPreview').innerHTML = `✅ Reassigned ${matches.length.toLocaleString()} record(s) to "${toLabel}".`;
+  document.getElementById('reassignProjectBtn').style.display='none';
   renderDashboard();
 }
 
