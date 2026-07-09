@@ -1852,7 +1852,7 @@ function deleteAllEmployees(){
   const removedIds = [];
   list.forEach(emp=>{
     const removedAtt = attendance.filter(a=>a.empId===emp.id);
-    removedIds.push(...removedAtt.map(a=>a.id));
+    pushAll(removedIds, removedAtt.map(a=>a.id));
     const removedRoster = shiftRoster.filter(r=>r.empId===emp.id);
     recycleBin.push({ id:uid(), employee: emp, attendance: removedAtt, shiftRoster: removedRoster, deletedAt: new Date().toISOString() });
   });
@@ -1911,7 +1911,7 @@ async function findAndRemoveDuplicateEmployees(){
   const removedIds = [];
   toRemove.forEach(({emp})=>{
     const removedAtt = attendance.filter(a=>a.empId===emp.id);
-    removedIds.push(...removedAtt.map(a=>a.id));
+    pushAll(removedIds, removedAtt.map(a=>a.id));
     const removedRoster = shiftRoster.filter(r=>r.empId===emp.id);
     recycleBin.push({ id:uid(), employee: emp, attendance: removedAtt, shiftRoster: removedRoster, deletedAt: new Date().toISOString() });
   });
@@ -2031,8 +2031,8 @@ function bulkRestoreFromRecycleBin(){
   if(!confirm(`Restore ${entries.length} employee(s) along with their attendance and roster records?`)) return;
   entries.forEach(entry=>{
     employees.push(entry.employee);
-    attendance.push(...entry.attendance);
-    shiftRoster.push(...entry.shiftRoster);
+    pushAll(attendance, entry.attendance);
+    pushAll(shiftRoster, entry.shiftRoster);
   });
   const idSet = new Set(ids);
   recycleBin = recycleBin.filter(x=>!idSet.has(x.id));
@@ -2062,8 +2062,8 @@ function restoreFromRecycleBin(binId){
   if(!entry) return;
   if(!confirm(`Restore "${entry.employee.name}" along with ${entry.attendance.length.toLocaleString()} attendance record(s)?`)) return;
   employees.push(entry.employee);
-  attendance.push(...entry.attendance);
-  shiftRoster.push(...entry.shiftRoster);
+  pushAll(attendance, entry.attendance);
+  pushAll(shiftRoster, entry.shiftRoster);
   recycleBin = recycleBin.filter(x=>x.id!==binId);
   invalidateEmployeeIndex();
   saveAttendanceDelta(entry.attendance, []);
@@ -3243,11 +3243,22 @@ function computeWorkingDays(year, month){
    report for an older month may not have its rows yet. This fetches that
    one month from Supabase the first time it's needed and merges it in,
    skipping the trip entirely once a month has already been loaded. */
+// Safe replacement for `target.push(...items)` — spreading a large array as
+// individual call arguments throws "Maximum call stack size exceeded" once
+// `items` gets into the tens of thousands (a real risk anywhere bulk
+// attendance history is merged/restored: imports, Recycle Bin restore,
+// duplicate-employee cleanup). A plain loop has no such ceiling.
+function pushAll(target, items){
+  for(let i=0;i<items.length;i++) target.push(items[i]);
+}
 function mergeAttendanceRows(rows){
   if(!rows.length) return;
   const existingIds = new Set(attendance.map(a=>a.id));
   const fresh = rows.map(attFromRow).filter(r=>!existingIds.has(r.id));
-  if(fresh.length){ attendance.push(...fresh); invalidateAttendanceIndex(); }
+  if(fresh.length){
+    pushAll(attendance, fresh);
+    invalidateAttendanceIndex();
+  }
 }
 async function ensureMonthLoaded(year, month){
   const monthPrefix = year+'-'+String(month+1).padStart(2,'0');
