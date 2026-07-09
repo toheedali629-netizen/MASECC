@@ -310,7 +310,7 @@ body.role-viewer .status-btn, body.role-none .status-btn {
           <div class="left">
             <input type="text" id="empSearch" placeholder="🔍 Search by name or ID...">
             <select id="empDeptFilter"><option value="">All Departments</option></select>
-            <select id="empCategoryFilter"><option value="">All Categories</option><option>Staff</option><option>Worker</option><option>Rental</option></select>
+            <select id="empCategoryFilter"><option value="">All Categories</option><option>Staff</option><option>Worker</option><option>Rental</option><option>PO</option></select>
             <select id="empProjectFilter"><option value="">All Projects</option><option value="none">No Project</option></select>
             <select id="empStatusFilter"><option value="">All Status</option><option value="Active">Active</option><option value="Inactive">Inactive</option></select>
           </div>
@@ -395,7 +395,7 @@ body.role-viewer .status-btn, body.role-none .status-btn {
             <input type="text" id="filterEmpId" placeholder="🔍 Search by Employee ID" style="min-width:180px;" onkeydown="if(event.key==='Enter') filterRecords();">
             <select id="filterEmp"><option value="">All Employees</option></select>
             <select id="filterDept"><option value="">All Departments</option></select>
-            <select id="filterCategory"><option value="">All Categories</option><option>Staff</option><option>Worker</option><option>Rental</option></select>
+            <select id="filterCategory"><option value="">All Categories</option><option>Staff</option><option>Worker</option><option>Rental</option><option>PO</option></select>
             <select id="filterProject"><option value="">All Projects</option><option value="none">No Project</option></select>
             <select id="filterStatus"><option value="">All Status</option><option>Present</option><option>Absent</option><option>Late</option><option>Half Day</option><option>On Leave</option></select>
             <button class="btn-outline" onclick="filterRecords()">Apply Filters</button>
@@ -676,7 +676,9 @@ body.role-viewer .status-btn, body.role-none .status-btn {
             Optionally tick specific modules below to restrict a Manager/Viewer to only those — leave all unchecked for full access. Admins always see every module.
           </p>
           <div class="form-row">
-            <div class="form-group"><label>User Email</label><input type="email" id="roleAssignEmail" placeholder="person@company.com"></div>
+            <div class="form-group"><label>User Email(s)</label>
+              <textarea id="roleAssignEmail" rows="3" placeholder="person@company.com&#10;One email per line, or separate with commas, to assign the same role to several people at once."></textarea>
+            </div>
             <div class="form-group"><label>Role</label>
               <select id="roleAssignRole">
                 <option value="admin">Admin</option>
@@ -691,7 +693,7 @@ body.role-viewer .status-btn, body.role-none .status-btn {
               <!-- populated by JS from MODULE_LIST -->
             </div>
           </div>
-          <button class="btn-primary" onclick="assignUserRole()">✅ Set Role</button>
+          <button class="btn-primary" onclick="assignUserRole()">✅ Set Role(s)</button>
           <div id="roleAssignMsg" style="margin-top:10px;font-size:12.5px;"></div>
         </div>
         <div class="card" style="margin-bottom:18px;">
@@ -726,7 +728,7 @@ body.role-viewer .status-btn, body.role-none .status-btn {
     </div>
     <div class="form-row">
       <div class="form-group"><label>Department</label><select id="empDept"></select></div>
-      <div class="form-group"><label>Category</label><select id="empCategory"><option>Staff</option><option>Worker</option><option>Rental</option></select></div>
+      <div class="form-group"><label>Category</label><select id="empCategory"><option>Staff</option><option>Worker</option><option>Rental</option><option>PO</option></select></div>
     </div>
     <div class="form-row">
       <div class="form-group"><label>Project</label><select id="empProject"></select></div>
@@ -4937,12 +4939,43 @@ async function loadAllFromCloud(){
 // simply never arrive and the app behaves exactly as before.
 let _realtimeChannel = null;
 let _realtimeRenderTimer = null;
+// Incoming 'attendance' realtime events are queued here instead of being
+// applied one-by-one. A bulk import can fire thousands of individual INSERT
+// events in rapid succession; applying each with an arr.findIndex() scan
+// (the old approach, still used below for the small tables) is an O(n) scan
+// per event — effectively O(n²) for a large import, which was freezing the
+// tab for everyone until they reloaded. Queuing lets flushRtAttQueue() apply
+// an entire burst in one O(n) pass instead.
+let _rtAttQueue = [];
+function flushRtAttQueue(){
+  if(!_rtAttQueue.length) return;
+  const idIndex = new Map();
+  attendance.forEach((a,i)=> idIndex.set(a.id, i));
+  const queue = _rtAttQueue; _rtAttQueue = [];
+  const deletedIdx = new Set();
+  queue.forEach(({eventType, newRow, oldRow})=>{
+    if(eventType==='DELETE'){
+      const id = oldRow && oldRow.id;
+      if(id==null) return;
+      const idx = idIndex.get(id);
+      if(idx!=null) deletedIdx.add(idx);
+    } else {
+      const item = attFromRow(newRow);
+      const idx = idIndex.get(item.id);
+      if(idx!=null && !deletedIdx.has(idx)) attendance[idx] = item;
+      else { attendance.push(item); idIndex.set(item.id, attendance.length-1); }
+    }
+  });
+  if(deletedIdx.size) attendance = attendance.filter((_,i)=>!deletedIdx.has(i));
+  invalidateAttendanceIndex();
+}
 function scheduleRealtimeRender(){
   // Don't yank the screen out from under someone mid-edit in a modal —
   // the change is already applied to local state, we just delay the
   // re-render until they close whatever they're working on.
   clearTimeout(_realtimeRenderTimer);
   _realtimeRenderTimer = setTimeout(()=>{
+    flushRtAttQueue();
     if(document.querySelector('.modal-overlay.active')){ scheduleRealtimeRender(); return; }
     renderAll(currentView);
   }, 200);
@@ -4996,8 +5029,9 @@ function onRealtimeChange(table, payload){
       eventType==='DELETE' ? remove(recycleBin) : upsert(recycleBin, recycleFromRow);
       break;
     case 'attendance':
-      eventType==='DELETE' ? remove(attendance) : upsert(attendance, attFromRow);
-      invalidateAttendanceIndex();
+      // Queued and applied in bulk by flushRtAttQueue() — see comment above
+      // _rtAttQueue — instead of an immediate O(n) scan per event.
+      _rtAttQueue.push({eventType, newRow, oldRow});
       break;
     default: return;
   }
@@ -5100,28 +5134,47 @@ function editUserModules(email, role, modules){
   renderRoleModuleCheckboxes(modules);
   document.getElementById('roleAssignEmail').scrollIntoView({behavior:'smooth', block:'center'});
 }
+// Assigns one role (+ optional module restriction) to one or more emails at
+// once. Accepts emails separated by newlines and/or commas so an admin can
+// paste a whole list (e.g. 5 new managers) and set them all in one click,
+// instead of repeating the single-email flow 5 times.
 async function assignUserRole(){
   const emailEl = document.getElementById('roleAssignEmail');
   const roleEl = document.getElementById('roleAssignRole');
   const msgEl = document.getElementById('roleAssignMsg');
-  const email = emailEl.value.trim();
   const role = roleEl.value;
+  const emails = Array.from(new Set(
+    emailEl.value.split(/[\n,]/).map(e=>e.trim()).filter(Boolean)
+  ));
   // Empty selection = no restriction (full access) — only store a list when
   // the admin actually ticked specific modules to narrow this user down to.
   const modules = getCheckedRoleModules();
   msgEl.textContent = ''; msgEl.style.color = '';
-  if(!email){ msgEl.textContent = 'Enter an email address.'; msgEl.style.color = 'var(--danger)'; return; }
-  try{
-    const {data: uid, error: lookupErr} = await sb.rpc('get_user_id_by_email', {target_email: email});
-    if(lookupErr){ msgEl.textContent = 'Failed: '+lookupErr.message; msgEl.style.color = 'var(--danger)'; return; }
-    if(!uid){ msgEl.textContent = 'No login found for that email. Create their account first in Supabase → Authentication → Users, then assign a role here.'; msgEl.style.color = 'var(--danger)'; return; }
-    const {error: upsertErr} = await sb.from('user_roles').upsert({user_id: uid, email, role, modules: modules.length? modules : null}, {onConflict:'user_id'});
-    if(upsertErr){ msgEl.textContent = 'Failed: '+upsertErr.message; msgEl.style.color = 'var(--danger)'; return; }
-    msgEl.textContent = `✅ ${email} is now "${role}"${modules.length? ' with '+modules.length+' module(s)' : ' with full access'}.`; msgEl.style.color = 'var(--accent)';
+  if(!emails.length){ msgEl.textContent = 'Enter at least one email address.'; msgEl.style.color = 'var(--danger)'; return; }
+
+  const succeeded = [], failed = [];
+  for(const email of emails){
+    try{
+      const {data: uid, error: lookupErr} = await sb.rpc('get_user_id_by_email', {target_email: email});
+      if(lookupErr){ failed.push(`${email} (${lookupErr.message})`); continue; }
+      if(!uid){ failed.push(`${email} (no login found — create their account in Supabase → Authentication → Users first)`); continue; }
+      const {error: upsertErr} = await sb.from('user_roles').upsert({user_id: uid, email, role, modules: modules.length? modules : null}, {onConflict:'user_id'});
+      if(upsertErr){ failed.push(`${email} (${upsertErr.message})`); continue; }
+      succeeded.push(email);
+    }catch(e){ failed.push(`${email} (${e.message})`); }
+  }
+
+  const parts = [];
+  if(succeeded.length) parts.push(`✅ Set "${role}"${modules.length? ' with '+modules.length+' module(s)' : ' with full access'} for: ${succeeded.join(', ')}.`);
+  if(failed.length) parts.push(`⚠️ Could not assign: ${failed.join('; ')}.`);
+  msgEl.innerHTML = parts.join('<br>');
+  msgEl.style.color = failed.length && !succeeded.length ? 'var(--danger)' : (failed.length ? 'var(--warning)' : 'var(--accent)');
+
+  if(succeeded.length){
     emailEl.value = '';
     renderRoleModuleCheckboxes([]);
     loadTeamRoles();
-  }catch(e){ msgEl.textContent = 'Error: '+e.message; msgEl.style.color = 'var(--danger)'; }
+  }
 }
 async function loadTeamRoles(){
   const body = document.getElementById('teamRolesBody');
@@ -5209,10 +5262,19 @@ async function startApp(userArg){
   // longer loaded eagerly at all — it's fetched on demand the first time
   // something needs it (currently: Reports, via ensureMonthLoaded).
   await loadRecentAttendanceFromCloud(BOOT_ATTENDANCE_MONTHS);
-  if(!attendance.length && employees.length){
-    attendance = seedDefaultAttendance();
-    firstRun = true;
-  }
+  // NOTE: This used to auto-fabricate ~20 days of *random* Present/Late/
+  // Half Day/Absent attendance (with random check-in/out times) for every
+  // employee whenever the recently-loaded window came back empty — even on
+  // an established database, e.g. if older data existed but nothing fell
+  // inside BOOT_ATTENDANCE_MONTHS, or a transient load hiccup made this
+  // window look empty. That fake data then got permanently written to the
+  // cloud via `save()` below, which is how invented rows like a nonsensical
+  // "Half Day" with a full 9-to-6 check-in/out end up mixed in with real
+  // biometric-imported records. Fabricating attendance data is never safe
+  // to do silently, so this call has been removed. If the recent window is
+  // genuinely empty, we simply leave `attendance` empty — real data (device
+  // imports or manual Mark Attendance entries) is the only thing that
+  // should ever populate this table.
   if(firstRun) await save();
   purgeExpiredRecycleBin();
   hideSyncBanner();
